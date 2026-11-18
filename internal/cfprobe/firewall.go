@@ -468,6 +468,21 @@ func syncIptablesPortState(
 			}
 		}
 
+		// 确保本机回环始终可访问该端口
+		if runner.lookPath("iptables") {
+			if runner.run("iptables", "-C", "INPUT", "-p", "tcp", "-s", "127.0.0.1", "--dport", portStr, "-j", "ACCEPT") != nil {
+				if err := runner.run("iptables", "-I", "INPUT", "-p", "tcp", "-s", "127.0.0.1", "--dport", portStr, "-j", "ACCEPT"); err != nil {
+					return false, err
+				}
+				changed = true
+			}
+		}
+		if runner.lookPath("ip6tables") {
+			if runner.run("ip6tables", "-C", "INPUT", "-p", "tcp", "-s", "::1/128", "--dport", portStr, "-j", "ACCEPT") != nil {
+				_ = runner.run("ip6tables", "-I", "INPUT", "-p", "tcp", "-s", "::1/128", "--dport", portStr, "-j", "ACCEPT")
+			}
+		}
+
 		for _, ip := range whitelist {
 			bin := "iptables"
 			if strings.Contains(ip, ":") {
@@ -485,12 +500,25 @@ func syncIptablesPortState(
 		}
 
 		publicOpen := runner.run("iptables", "-C", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "ACCEPT") == nil
+		publicDrop := runner.run("iptables", "-C", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "DROP") == nil
 		if allowAll {
+			if publicDrop {
+				if err := runner.run("iptables", "-D", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "DROP"); err != nil {
+					return false, err
+				}
+				changed = true
+			}
+			if runner.lookPath("ip6tables") && runner.run("ip6tables", "-C", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "DROP") == nil {
+				_ = runner.run("ip6tables", "-D", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "DROP")
+			}
 			if !publicOpen {
 				if err := runner.run("iptables", "-I", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "ACCEPT"); err != nil {
 					return false, err
 				}
 				changed = true
+			}
+			if runner.lookPath("ip6tables") && runner.run("ip6tables", "-C", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "ACCEPT") != nil {
+				_ = runner.run("ip6tables", "-I", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "ACCEPT")
 			}
 		} else {
 			if publicOpen {
@@ -498,6 +526,18 @@ func syncIptablesPortState(
 					return false, err
 				}
 				changed = true
+			}
+			if runner.lookPath("ip6tables") && runner.run("ip6tables", "-C", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "ACCEPT") == nil {
+				_ = runner.run("ip6tables", "-D", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "ACCEPT")
+			}
+			if !publicDrop {
+				if err := runner.run("iptables", "-A", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "DROP"); err != nil {
+					return false, err
+				}
+				changed = true
+			}
+			if runner.lookPath("ip6tables") && runner.run("ip6tables", "-C", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "DROP") != nil {
+				_ = runner.run("ip6tables", "-A", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "DROP")
 			}
 		}
 	}

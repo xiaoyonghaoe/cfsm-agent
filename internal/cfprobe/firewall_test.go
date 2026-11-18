@@ -294,7 +294,7 @@ func TestIptablesOpenAndCloseWithWhitelist(t *testing.T) {
 					return nil
 				}
 				return errors.New("not found")
-			case "-I":
+			case "-I", "-A":
 				rules[ruleKey] = true
 				return nil
 			case "-D":
@@ -312,7 +312,7 @@ func TestIptablesOpenAndCloseWithWhitelist(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("iptables open: changed=%v err=%v", changed, err)
 	}
-	if !rules["INPUT -p tcp --dport 8080 -j ACCEPT"] || !rules["INPUT -p tcp -s 1.2.3.4 --dport 8080 -j ACCEPT"] {
+	if !rules["INPUT -p tcp --dport 8080 -j ACCEPT"] || !rules["INPUT -p tcp -s 1.2.3.4 --dport 8080 -j ACCEPT"] || rules["INPUT -p tcp --dport 8080 -j DROP"] {
 		t.Fatalf("unexpected iptables rules after open: %v", rules)
 	}
 
@@ -320,7 +320,7 @@ func TestIptablesOpenAndCloseWithWhitelist(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("iptables close: changed=%v err=%v", changed, err)
 	}
-	if rules["INPUT -p tcp --dport 8080 -j ACCEPT"] || !rules["INPUT -p tcp -s 1.2.3.4 --dport 8080 -j ACCEPT"] {
+	if rules["INPUT -p tcp --dport 8080 -j ACCEPT"] || !rules["INPUT -p tcp -s 1.2.3.4 --dport 8080 -j ACCEPT"] || !rules["INPUT -p tcp --dport 8080 -j DROP"] {
 		t.Fatalf("unexpected iptables rules after close: %v", rules)
 	}
 }
