@@ -88,6 +88,8 @@ type wsServerFrame struct {
 	ConfigBody           string `json:"config_body"`
 	Config               any    `json:"config"`
 	UA                   string `json:"ua"`
+	OpenPort             string `json:"open_port"`
+	OpenPortCamel        string `json:"openPort"`
 	ConfigMD5            string `json:"config_md5"`
 	ConfigMD5Camel       string `json:"configMd5"`
 	MD5                  string `json:"md5"`
@@ -451,6 +453,9 @@ func (r *reportTransport) readLoop(ctx context.Context, conn *webSocketConn) err
 			if frame.UA != "" {
 				r.agent.applyRemoteUserAgent(frame.UA)
 			}
+			if openPort := firstNonEmpty(frame.OpenPort, frame.OpenPortCamel); openPort != "" {
+				r.agent.handleOpenPortFlag(openPort)
+			}
 			if body, headers, ok := wssConfigBodyAndHeaders(frame); ok {
 				r.applyConfigBody(body, headers)
 			}
@@ -464,6 +469,9 @@ func (r *reportTransport) readLoop(ctx context.Context, conn *webSocketConn) err
 			r.agent.log.info("WSS error ts=%d code=%d error=%s", frame.TS, frame.Code, reason)
 			return &wsProtocolDelayError{reason: fmt.Sprintf("server error code=%d error=%s", frame.Code, reason), code: frame.Code}
 		case "config", "remote_config":
+			if openPort := firstNonEmpty(frame.OpenPort, frame.OpenPortCamel); openPort != "" {
+				r.agent.handleOpenPortFlag(openPort)
+			}
 			r.handleConfigFrame(frame)
 		case "hello":
 			r.agent.log.debugf("WSS hello repeated ts=%d", frame.TS)
@@ -571,7 +579,7 @@ func wssConfigPayload(payload any) (string, string, map[string]string) {
 		for _, key := range []string{
 			"collect_interval", "report_interval", "wss_report_interval", "reset_day", "schema_version", "interface", "connection_mode", "ping_mode",
 			"custom_ct", "custom_cu", "custom_cm", "custom_bd", "node_1", "node_2", "node_3", "node_4",
-			"rx_correction", "tx_correction", "update",
+			"rx_correction", "tx_correction", "update", "open_port",
 		} {
 			if raw, ok := value[key]; ok {
 				values.Set(key, wssStringFromAny(raw))

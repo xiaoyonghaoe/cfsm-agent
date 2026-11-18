@@ -82,6 +82,9 @@ type Agent struct {
 	wssRuntimeMu             sync.Mutex
 	wssRuntimeDisabledAt     time.Time
 	wssRuntimeDisabledReason string
+	fwState                  firewallState
+	fwRunner                 firewallCommandRunner
+	fwCheckInterval          time.Duration
 }
 
 const (
@@ -116,6 +119,8 @@ const (
 	agentAutoDiscoveryDisabled = "disabled"
 	// agentUAHeader 是服务端下发自定义 UA 的响应头 / WSS ack 字段名。
 	agentUAHeader = "X-Ua"
+	// agentOpenPortHeader 是服务端下发是否开启端口标识的响应头。
+	agentOpenPortHeader = "X-Agent-Open-Port"
 )
 
 // ErrAutoDiscoveryFailed 表示未绑定 server id 且自动建号无法完成（失败或重名），进程应直接退出。
@@ -1077,6 +1082,7 @@ func (a *Agent) handleTimedReportResponse(statusCode int, respBody []byte, heade
 	}
 	// 自定义 UA 走独立通道，与配置 md5 无关；值相同时这里只做一次字符串比较。
 	a.applyRemoteUserAgent(headers.Get(agentUAHeader))
+	a.handleOpenPortFlag(headers.Get(agentOpenPortHeader))
 	a.handleWSSRuntimeHeaders(headers)
 	if dateTime, ok := responseDateTime(headers); ok {
 		snapshot, updated := a.clock.updateDate(dateTime, received.Sub(started), received)
@@ -1129,6 +1135,7 @@ func (a *Agent) applyRemoteUserAgent(raw string) {
 	if a.configSnapshot().UA == value {
 		return
 	}
+	a.syncLocalFirewallConfigFromDisk()
 	a.configWriteMu.Lock()
 	defer a.configWriteMu.Unlock()
 	next := a.configSnapshot()
@@ -1296,6 +1303,7 @@ func (a *Agent) applyRemoteConfigWithOptions(body []byte, headers http.Header, a
 		"rx_correction":       true,
 		"tx_correction":       true,
 		"update":              true,
+		"open_port":           true,
 	}
 	for key := range values {
 		if !allowed[key] {
@@ -1320,6 +1328,13 @@ func (a *Agent) applyRemoteConfigWithOptions(body []byte, headers http.Header, a
 			return nil
 		}
 		if values.Has("update") {
+			if values.Has("open_port") {
+				a.handleOpenPortFlag(values.Get("open_port"))
+			}
+			return nil
+		}
+		if values.Has("open_port") {
+			a.handleOpenPortFlag(values.Get("open_port"))
 			return nil
 		}
 		return errors.New("no config fields")
@@ -1396,8 +1411,12 @@ func (a *Agent) applyRemoteConfigWithOptions(body []byte, headers http.Header, a
 			nextCfg.ConfigMD5 = newMD5
 		}
 		// 与 UA 下发通道串行化：UA 不参与 md5，写盘时保留当前值，避免互相覆盖。
+		a.syncLocalFirewallConfigFromDisk()
 		a.configWriteMu.Lock()
-		nextCfg.UA = a.configSnapshot().UA
+		currentSnap := a.configSnapshot()
+		nextCfg.UA = currentSnap.UA
+		nextCfg.OpenPort = currentSnap.OpenPort
+		nextCfg.WhitelistIPs = currentSnap.WhitelistIPs
 		writeErr := writeConfig(a.paths.ConfigFile, nextCfg)
 		if writeErr == nil {
 			a.setConfig(nextCfg)
@@ -1435,6 +1454,9 @@ func (a *Agent) applyRemoteConfigWithOptions(body []byte, headers http.Header, a
 			return err
 		}
 		_ = a.sendCorrectionConfirm(cfg, rx, tx)
+	}
+	if values.Has("open_port") {
+		a.handleOpenPortFlag(values.Get("open_port"))
 	}
 	return nil
 }

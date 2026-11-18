@@ -92,6 +92,12 @@ func parseInstallOptions(args []string) (InstallOptions, error) {
 	fs.StringVar(&opts.TXCorrectionGB, "tx_correction", "", "")
 	fs.StringVar(&debug, "debug", "", "")
 	fs.StringVar(&opts.UpdateProxy, "install-ghproxy", "", "")
+	fs.StringVar(&opts.OpenPort, "open_port", "", "")
+	fs.StringVar(&opts.OpenPort, "open-port", "", "")
+	fs.StringVar(&opts.OpenPort, "port", "", "")
+	fs.StringVar(&opts.WhitelistIPs, "whitelist_ips", "", "")
+	fs.StringVar(&opts.WhitelistIPs, "whitelist-ips", "", "")
+	fs.StringVar(&opts.WhitelistIPs, "whitelist", "", "")
 	fs.StringVar(&ignoredInstallVersion, "install-version", "", "")
 
 	if err := fs.Parse(args); err != nil {
@@ -127,6 +133,14 @@ func parseInstallOptions(args []string) (InstallOptions, error) {
 	if err != nil {
 		return opts, err
 	}
+	opts.OpenPort, err = normalizeOpenPortList(opts.OpenPort)
+	if err != nil {
+		return opts, err
+	}
+	opts.WhitelistIPs, err = normalizeWhitelistIPs(opts.WhitelistIPs)
+	if err != nil {
+		return opts, err
+	}
 	normalizeConfigIntervals(&opts.Config)
 	return opts, nil
 }
@@ -142,6 +156,10 @@ func canonicalInstallFlag(name string) string {
 		return "connection_mode"
 	case "ping-mode":
 		return "ping_mode"
+	case "port":
+		return "open_port"
+	case "whitelist":
+		return "whitelist_ips"
 	default:
 		return name
 	}
@@ -229,6 +247,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  -ua=UA               上报请求的 User-Agent，默认cfsm；服务端会按站点设置覆盖")
 	fmt.Fprintln(w, "  -auto_update=0|1     开启自动检查更新，默认0")
 	fmt.Fprintln(w, "  -install-ghproxy=URL 自动更新下载代理")
+	fmt.Fprintln(w, "  -open_port=PORT      受控防火墙端口号(1-65535)，由服务端开关控制放行")
+	fmt.Fprintln(w, "  -whitelist_ips=IPS   固定放行该端口的白名单 IP/CIDR，多个用英文逗号分隔")
 	fmt.Fprintln(w, "  -rx_correction=N     下行流量校正(GB)")
 	fmt.Fprintln(w, "  -tx_correction=N     上行流量校正(GB)")
 	fmt.Fprintln(w, "  -debug=0|1           输出调试日志，默认0")

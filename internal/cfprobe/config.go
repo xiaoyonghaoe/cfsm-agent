@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -116,6 +117,60 @@ func normalizeInterfaceList(raw string) (string, error) {
 	return joined, nil
 }
 
+func normalizeOpenPortList(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "0" {
+		return "", nil
+	}
+	parts := strings.Split(raw, ",")
+	seen := map[int]bool{}
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		token := strings.TrimSpace(part)
+		if token == "" {
+			continue
+		}
+		port, err := strconv.Atoi(token)
+		if err != nil || port < 1 || port > 65535 {
+			return "", fmt.Errorf("open_port 参数非法: %q（需为 1-65535 的端口号）", token)
+		}
+		if !seen[port] {
+			seen[port] = true
+			out = append(out, strconv.Itoa(port))
+		}
+	}
+	return strings.Join(out, ","), nil
+}
+
+func normalizeWhitelistIPs(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	parts := strings.Split(raw, ",")
+	seen := map[string]bool{}
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		token := strings.TrimSpace(part)
+		if token == "" {
+			continue
+		}
+		var normalized string
+		if ip := net.ParseIP(token); ip != nil {
+			normalized = ip.String()
+		} else if _, ipNet, err := net.ParseCIDR(token); err == nil && ipNet != nil {
+			normalized = ipNet.String()
+		} else {
+			return "", fmt.Errorf("whitelist_ips 参数非法: %q（需为合法 IP 或 CIDR）", token)
+		}
+		if !seen[normalized] {
+			seen[normalized] = true
+			out = append(out, normalized)
+		}
+	}
+	return strings.Join(out, ","), nil
+}
+
 func parseKVFile(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -170,6 +225,8 @@ func readConfig(path string) (Config, error) {
 	cfg.UA = normalizeUserAgentValue(values["UA"])
 	cfg.AutoUpdate = values["AUTO_UPDATE"] == "1"
 	cfg.UpdateProxy = strings.TrimSpace(values["UPDATE_PROXY"])
+	cfg.OpenPort, _ = normalizeOpenPortList(firstNonEmpty(values["OPEN_PORT"], values["FIREWALL_PORT"], values["PORT"]))
+	cfg.WhitelistIPs, _ = normalizeWhitelistIPs(values["WHITELIST_IPS"])
 	cfg.ConfigMD5 = values["CONFIG_MD5"]
 	if cfg.ConfigMD5 == "" {
 		cfg.ConfigMD5 = "none"
@@ -212,6 +269,8 @@ func writeConfig(path string, cfg Config) error {
 		writeKV("AUTO_UPDATE", "0")
 	}
 	writeKV("UPDATE_PROXY", cfg.UpdateProxy)
+	writeKV("OPEN_PORT", cfg.OpenPort)
+	writeKV("WHITELIST_IPS", cfg.WhitelistIPs)
 	if cfg.ConfigMD5 == "" {
 		cfg.ConfigMD5 = "none"
 	}
@@ -252,6 +311,16 @@ func normalizeConfigIntervals(cfg *Config) {
 	}
 	cfg.UA = normalizeUserAgentValue(cfg.UA)
 	cfg.UpdateProxy = strings.TrimSpace(cfg.UpdateProxy)
+	if openPort, err := normalizeOpenPortList(cfg.OpenPort); err == nil {
+		cfg.OpenPort = openPort
+	} else {
+		cfg.OpenPort = ""
+	}
+	if whitelistIPs, err := normalizeWhitelistIPs(cfg.WhitelistIPs); err == nil {
+		cfg.WhitelistIPs = whitelistIPs
+	} else {
+		cfg.WhitelistIPs = ""
+	}
 }
 
 func parseIntDefault(raw string, def int) int {

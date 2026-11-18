@@ -162,6 +162,10 @@ func mergeExplicitInstallConfig(dst *Config, src Config, explicit map[string]boo
 			dst.AutoUpdate = src.AutoUpdate
 		case "install_ghproxy":
 			dst.UpdateProxy = src.UpdateProxy
+		case "open_port":
+			dst.OpenPort = src.OpenPort
+		case "whitelist_ips":
+			dst.WhitelistIPs = src.WhitelistIPs
 		}
 	}
 }
