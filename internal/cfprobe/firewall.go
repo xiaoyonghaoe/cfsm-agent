@@ -21,13 +21,15 @@ type firewallCommandRunner struct {
 }
 
 type firewallState struct {
-	mu            sync.Mutex
-	applied       bool
-	allowAll      bool
-	openPort      string
-	whitelistIPs  string
-	lastCheckedAt time.Time
-	configModTime time.Time
+	mu              sync.Mutex
+	applied         bool
+	allowAll        bool
+	openPort        string
+	whitelistIPs    string
+	sshPort         string
+	sshWhitelistIPs string
+	lastCheckedAt   time.Time
+	configModTime   time.Time
 }
 
 func defaultFirewallCommandRunner() firewallCommandRunner {
@@ -140,6 +142,8 @@ func (a *Agent) syncLocalFirewallConfigFromDisk() {
 	}
 	diskOpenPort, openPortErr := normalizeOpenPortList(firstNonEmpty(values["OPEN_PORT"], values["FIREWALL_PORT"], values["PORT"]))
 	diskWhitelist, whitelistErr := normalizeWhitelistIPs(values["WHITELIST_IPS"])
+	diskSSHPort, sshPortErr := normalizeOpenPortList(values["SSH_PORT"])
+	diskSSHWhitelist, sshWhitelistErr := normalizeWhitelistIPs(values["SSH_WHITELIST_IPS"])
 
 	a.configWriteMu.Lock()
 	cfg := a.configSnapshot()
@@ -150,6 +154,14 @@ func (a *Agent) syncLocalFirewallConfigFromDisk() {
 	}
 	if whitelistErr == nil && cfg.WhitelistIPs != diskWhitelist {
 		cfg.WhitelistIPs = diskWhitelist
+		changed = true
+	}
+	if sshPortErr == nil && cfg.SSHPort != diskSSHPort {
+		cfg.SSHPort = diskSSHPort
+		changed = true
+	}
+	if sshWhitelistErr == nil && cfg.SSHWhitelistIPs != diskSSHWhitelist {
+		cfg.SSHWhitelistIPs = diskSSHWhitelist
 		changed = true
 	}
 	if changed {
@@ -173,11 +185,13 @@ func (a *Agent) handleOpenPortFlag(raw string) {
 
 	a.syncLocalFirewallConfigFromDisk()
 	cfg := a.configSnapshot()
-	ports := parseOpenPortNumbers(cfg.OpenPort)
-	if len(ports) == 0 {
+	openPorts := parseOpenPortNumbers(cfg.OpenPort)
+	sshPorts := parseOpenPortNumbers(cfg.SSHPort)
+	if len(openPorts) == 0 && len(sshPorts) == 0 {
 		return
 	}
 	whitelist := splitWhitelistIPs(cfg.WhitelistIPs)
+	sshWhitelist := splitWhitelistIPs(cfg.SSHWhitelistIPs)
 
 	a.fwState.mu.Lock()
 	defer a.fwState.mu.Unlock()
@@ -186,7 +200,9 @@ func (a *Agent) handleOpenPortFlag(raw string) {
 	stateChanged := !a.fwState.applied ||
 		a.fwState.allowAll != allowAll ||
 		a.fwState.openPort != cfg.OpenPort ||
-		a.fwState.whitelistIPs != cfg.WhitelistIPs
+		a.fwState.whitelistIPs != cfg.WhitelistIPs ||
+		a.fwState.sshPort != cfg.SSHPort ||
+		a.fwState.sshWhitelistIPs != cfg.SSHWhitelistIPs
 
 	if !stateChanged {
 		checkInterval := time.Duration(cfg.ReportInterval) * time.Second
@@ -201,20 +217,37 @@ func (a *Agent) handleOpenPortFlag(raw string) {
 		}
 	}
 
-	removedWhitelist := diffRemovedStrings(splitWhitelistIPs(a.fwState.whitelistIPs), whitelist)
-	changed, err := syncFirewallPortState(ports, whitelist, removedWhitelist, allowAll, stateChanged, a.firewallRunner(), a.log)
-	if err != nil {
-		a.log.warnf("firewall port sync failed port=%s allow_all=%v: %v", cfg.OpenPort, allowAll, err)
-		return
+	runner := a.firewallRunner()
+	if len(openPorts) > 0 {
+		removedWhitelist := diffRemovedStrings(splitWhitelistIPs(a.fwState.whitelistIPs), whitelist)
+		changed, err := syncFirewallPortState(openPorts, whitelist, removedWhitelist, allowAll, stateChanged, runner, a.log)
+		if err != nil {
+			a.log.warnf("firewall port sync failed port=%s allow_all=%v: %v", cfg.OpenPort, allowAll, err)
+			return
+		}
+		if changed {
+			a.log.info("firewall port synced port=%s allow_all=%v whitelist=%s", cfg.OpenPort, allowAll, firstNonEmpty(cfg.WhitelistIPs, "none"))
+		}
 	}
+	if len(sshPorts) > 0 {
+		removedSSHWhitelist := diffRemovedStrings(splitWhitelistIPs(a.fwState.sshWhitelistIPs), sshWhitelist)
+		changed, err := syncFirewallPortState(sshPorts, sshWhitelist, removedSSHWhitelist, allowAll, stateChanged, runner, a.log)
+		if err != nil {
+			a.log.warnf("firewall ssh port sync failed port=%s allow_all=%v: %v", cfg.SSHPort, allowAll, err)
+			return
+		}
+		if changed {
+			a.log.info("firewall ssh port synced port=%s allow_all=%v whitelist=%s", cfg.SSHPort, allowAll, firstNonEmpty(cfg.SSHWhitelistIPs, "none"))
+		}
+	}
+
 	a.fwState.applied = true
 	a.fwState.allowAll = allowAll
 	a.fwState.openPort = cfg.OpenPort
 	a.fwState.whitelistIPs = cfg.WhitelistIPs
+	a.fwState.sshPort = cfg.SSHPort
+	a.fwState.sshWhitelistIPs = cfg.SSHWhitelistIPs
 	a.fwState.lastCheckedAt = now
-	if changed {
-		a.log.info("firewall port synced port=%s allow_all=%v whitelist=%s", cfg.OpenPort, allowAll, firstNonEmpty(cfg.WhitelistIPs, "none"))
-	}
 }
 
 func detectFirewallBackend(runner firewallCommandRunner) string {

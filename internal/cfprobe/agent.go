@@ -1417,6 +1417,8 @@ func (a *Agent) applyRemoteConfigWithOptions(body []byte, headers http.Header, a
 		nextCfg.UA = currentSnap.UA
 		nextCfg.OpenPort = currentSnap.OpenPort
 		nextCfg.WhitelistIPs = currentSnap.WhitelistIPs
+		nextCfg.SSHPort = currentSnap.SSHPort
+		nextCfg.SSHWhitelistIPs = currentSnap.SSHWhitelistIPs
 		writeErr := writeConfig(a.paths.ConfigFile, nextCfg)
 		if writeErr == nil {
 			a.setConfig(nextCfg)

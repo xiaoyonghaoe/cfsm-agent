@@ -227,6 +227,8 @@ func readConfig(path string) (Config, error) {
 	cfg.UpdateProxy = strings.TrimSpace(values["UPDATE_PROXY"])
 	cfg.OpenPort, _ = normalizeOpenPortList(firstNonEmpty(values["OPEN_PORT"], values["FIREWALL_PORT"], values["PORT"]))
 	cfg.WhitelistIPs, _ = normalizeWhitelistIPs(values["WHITELIST_IPS"])
+	cfg.SSHPort, _ = normalizeOpenPortList(values["SSH_PORT"])
+	cfg.SSHWhitelistIPs, _ = normalizeWhitelistIPs(values["SSH_WHITELIST_IPS"])
 	cfg.ConfigMD5 = values["CONFIG_MD5"]
 	if cfg.ConfigMD5 == "" {
 		cfg.ConfigMD5 = "none"
@@ -271,6 +273,8 @@ func writeConfig(path string, cfg Config) error {
 	writeKV("UPDATE_PROXY", cfg.UpdateProxy)
 	writeKV("OPEN_PORT", cfg.OpenPort)
 	writeKV("WHITELIST_IPS", cfg.WhitelistIPs)
+	writeKV("SSH_PORT", cfg.SSHPort)
+	writeKV("SSH_WHITELIST_IPS", cfg.SSHWhitelistIPs)
 	if cfg.ConfigMD5 == "" {
 		cfg.ConfigMD5 = "none"
 	}
@@ -320,6 +324,16 @@ func normalizeConfigIntervals(cfg *Config) {
 		cfg.WhitelistIPs = whitelistIPs
 	} else {
 		cfg.WhitelistIPs = ""
+	}
+	if sshPort, err := normalizeOpenPortList(cfg.SSHPort); err == nil {
+		cfg.SSHPort = sshPort
+	} else {
+		cfg.SSHPort = ""
+	}
+	if sshWhitelistIPs, err := normalizeWhitelistIPs(cfg.SSHWhitelistIPs); err == nil {
+		cfg.SSHWhitelistIPs = sshWhitelistIPs
+	} else {
+		cfg.SSHWhitelistIPs = ""
 	}
 }
 

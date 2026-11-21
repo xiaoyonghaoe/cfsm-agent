@@ -325,3 +325,89 @@ func TestIptablesOpenAndCloseWithWhitelist(t *testing.T) {
 	}
 }
 
+func TestSSHPortAndOpenPortIndependentWhitelists(t *testing.T) {
+	rules := map[string]bool{}
+	runner := firewallCommandRunner{
+		lookPath: func(name string) bool {
+			return name == "iptables"
+		},
+		run: func(name string, args ...string) error {
+			action := args[0]
+			ruleKey := strings.Join(args[1:], " ")
+			switch action {
+			case "-C":
+				if rules[ruleKey] {
+					return nil
+				}
+				return errors.New("not found")
+			case "-I", "-A":
+				rules[ruleKey] = true
+				return nil
+			case "-D":
+				delete(rules, ruleKey)
+				return nil
+			}
+			return nil
+		},
+		output: func(name string, args ...string) (string, error) {
+			return "", nil
+		},
+	}
+
+	tmp := t.TempDir()
+	configFile := tmp + "/config.conf"
+	cfg := defaultConfig()
+	cfg.ServerID = "sid"
+	cfg.Secret = "secret"
+	cfg.WorkerURL = "https://worker.example.com/update"
+	cfg.OpenPort = "33060"
+	cfg.WhitelistIPs = "68.68.249.61,75.37.238.63"
+	cfg.SSHPort = "22"
+	cfg.SSHWhitelistIPs = "75.37.238.63"
+	if err := writeConfig(configFile, cfg); err != nil {
+		t.Fatalf("writeConfig: %v", err)
+	}
+
+	gotCfg, err := readConfig(configFile)
+	if err != nil {
+		t.Fatalf("readConfig: %v", err)
+	}
+	if gotCfg.SSHPort != "22" || gotCfg.SSHWhitelistIPs != "75.37.238.63" {
+		t.Fatalf("readConfig ssh fields = (%q, %q)", gotCfg.SSHPort, gotCfg.SSHWhitelistIPs)
+	}
+
+	agent := &Agent{
+		cfg:             cfg,
+		paths:           Paths{ConfigFile: configFile, TrafficFile: tmp + "/traffic.dat"},
+		log:             newLogger(false),
+		fwRunner:        runner,
+		fwCheckInterval: -1,
+	}
+
+	// 1. 面板标识为 0：33060 和 22 都关闭全网，但各自只放行自己的白名单
+	headers := http.Header{}
+	headers.Set(agentOpenPortHeader, "0")
+	agent.handleReportResponse(http.StatusNoContent, nil, headers)
+
+	if !rules["INPUT -p tcp --dport 33060 -j DROP"] || !rules["INPUT -p tcp --dport 22 -j DROP"] {
+		t.Fatalf("expected DROP rules on 33060 and 22, got %v", rules)
+	}
+	if !rules["INPUT -p tcp -s 68.68.249.61 --dport 33060 -j ACCEPT"] || rules["INPUT -p tcp -s 68.68.249.61 --dport 22 -j ACCEPT"] {
+		t.Fatalf("expected 68.68.249.61 only on 33060, not on 22; got %v", rules)
+	}
+	if !rules["INPUT -p tcp -s 75.37.238.63 --dport 33060 -j ACCEPT"] || !rules["INPUT -p tcp -s 75.37.238.63 --dport 22 -j ACCEPT"] {
+		t.Fatalf("expected 75.37.238.63 on both 33060 and 22; got %v", rules)
+	}
+
+	// 2. 面板标识为 1：33060 和 22 都全网放行
+	headers.Set(agentOpenPortHeader, "1")
+	agent.handleReportResponse(http.StatusNoContent, nil, headers)
+
+	if rules["INPUT -p tcp --dport 33060 -j DROP"] || rules["INPUT -p tcp --dport 22 -j DROP"] {
+		t.Fatalf("expected DROP rules removed when open_port=1, got %v", rules)
+	}
+	if !rules["INPUT -p tcp --dport 33060 -j ACCEPT"] || !rules["INPUT -p tcp --dport 22 -j ACCEPT"] {
+		t.Fatalf("expected public ACCEPT rules on 33060 and 22, got %v", rules)
+	}
+}
+

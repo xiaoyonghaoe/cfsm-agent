@@ -51,6 +51,10 @@ type Config struct {
 	OpenPort string
 	// WhitelistIPs 是本地配置的固定白名单 IP/CIDR 列表（英文逗号分隔），始终允许访问 OpenPort。
 	WhitelistIPs string
+	// SSHPort 是本地配置的待控制 SSH 防火墙端口（如 "22"），与 OpenPort 共用服务端 open_port 开关。
+	SSHPort string
+	// SSHWhitelistIPs 是本地配置的 SSH 固定白名单 IP/CIDR 列表（英文逗号分隔），始终允许访问 SSHPort。
+	SSHWhitelistIPs string
 	// ConfigMD5 mirrors the worker dynamic config version; local fields like
 	// AutoUpdate and UpdateProxy are intentionally outside that comparison.
 	ConfigMD5 string

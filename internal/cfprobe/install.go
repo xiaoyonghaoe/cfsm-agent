@@ -166,6 +166,10 @@ func mergeExplicitInstallConfig(dst *Config, src Config, explicit map[string]boo
 			dst.OpenPort = src.OpenPort
 		case "whitelist_ips":
 			dst.WhitelistIPs = src.WhitelistIPs
+		case "ssh_port":
+			dst.SSHPort = src.SSHPort
+		case "ssh_whitelist_ips":
+			dst.SSHWhitelistIPs = src.SSHWhitelistIPs
 		}
 	}
 }
